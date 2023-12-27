@@ -1,0 +1,16 @@
+name: Allen_AI
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.8
+  - pip
+  - pip:
+    - farm-haystack==1.17.2
+    - gradio==3.40.1
+    - faiss-cpu  # For systems without a GPU
+    - 'farm-haystack[sql]'
+    - torch
+    - torchvision
+    - torchaudio
+    - 'farm-haystack[inference]'

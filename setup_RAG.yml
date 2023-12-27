@@ -1,0 +1,142 @@
+---
+- name: Setup Intel RAG Environment
+  hosts: all
+  become: yes
+  vars:
+    workspace_path: "/home/test/QnA_RAG"  # Change this to the desired path
+    workspace_path_hf: "/home/test/QnA_RAG/QnA_fastRAG_CSV_LLAMA2" 
+    conda_installer_url: "https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"
+    conda_env_file: "/home/test/ansible-script-QnA-RAG/env/Allen_AI.yml"
+    remote_conda_env_file: "/tmp/Allen_AI.yml"
+    conda_path: "/opt/miniconda3/bin"
+    local_directory: "/home/test/ansible-script-QnA-RAG/QnA_fastRAG_CSV_LLAMA2"
+    local_directory_huggingFace: "/home/test/ansible-script-QnA-RAG/Llama-2-7b-chat-hf"
+  
+  tasks:
+    - name: Install git
+      apt:
+        name: git
+        state: present
+      register: git_installed
+
+    - name: Find git executable
+      command: which git
+      register: git_path
+      when: git_installed is changed
+
+    - name: Create workspace directory
+      file:
+        path: "{{ workspace_path }}"
+        state: directory
+    
+    - name: Copy QnA_fastRAG_CSV_LLAMA2 directory to remote host
+      synchronize:
+        src: "{{ local_directory }}"
+        dest: "{{ workspace_path }}"
+        recursive: yes
+    
+    - name: Copy Llama-2-7b-chat-hf directory to remote host
+      synchronize:
+        src: "{{ local_directory }}"
+        dest: "{{ workspace_path }}"
+        recursive: yes
+
+    # Additional tasks for setting up Conda, creating environments, and running scripts should be added here.
+    # Some steps might require manual intervention or a different automation approach.
+    - name: Install Conda
+      block:
+        - name: Download Miniconda
+          get_url:
+            url: https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+            dest: /tmp/Miniconda3-latest-Linux-x86_64.sh
+            mode: 0550
+
+        - name: Create conda folder
+          become: True
+          file:
+            path: /opt/miniconda3
+            state: directory
+            mode: 755
+            recurse: yes
+
+        - name: Run the Miniconda installer
+          shell: /tmp/Miniconda3-latest-Linux-x86_64.sh -b -u -p /opt/miniconda3
+
+        - name: Remove the Miniconda installer
+          file:
+            state: absent
+            path: /tmp/Miniconda3-latest-Linux-x86_64.sh
+
+        - name: Add path and initialize conda
+          shell: "export PATH=/opt/miniconda3/bin:$PATH; conda init"
+          args:
+            executable: /bin/bash
+            
+        - name: Conda - read permission for all
+          become: True
+          file:
+            path: /opt/miniconda3
+            mode: a+r
+            recurse: yes
+
+        - name: Conda - execution permission for all
+          become: True
+          file:
+            path: /opt/miniconda3/bin
+            mode: a+x
+            recurse: yes
+
+      #Task will take approximately 15 mins to complete setting up the environment
+        - name: Copy Allen_AI.yml to remote host
+          copy:
+            src: "{{ conda_env_file }}"
+            dest: "{{ remote_conda_env_file }}"
+
+        - name: Create Conda environment from Allen_AI.yml
+          shell: conda env create -f "{{ remote_conda_env_file }}"
+          environment:
+            PATH: "{{ conda_path }}:{{ ansible_env.PATH }}"
+            WORKSPACE: "{{ workspace_path }}"
+          ignore_errors: yes
+
+    - name: Install Git
+      become: yes
+      apt:
+        name:
+          - git
+        state: present
+
+    - name: Find Python executable in Conda environment
+      become: yes
+      shell: /opt/miniconda3/bin/conda run -n intel_image_rec which python
+      register: conda_python_executable
+      environment:
+        PATH: "/opt/miniconda3/envs/intel_image_rec/bin:{{ ansible_env.PATH }}"
+        WORKSPACE: "{{ workspace_path }}"
+
+    - name: Install pip in Conda environment
+      become: yes
+      shell: /opt/miniconda3/bin/conda run -n intel_image_rec python -m ensurepip
+      environment:
+        PATH: "/opt/miniconda3/envs/intel_image_rec/bin:{{ ansible_env.PATH }}"
+        WORKSPACE: "{{ workspace_path }}"
+
+    - name: Get CPU architecture information
+      shell: lscpu | grep 'am'
+      register: cpu_info
+
+    - name: Print CPU architecture information
+      debug:
+        msg: "{{ cpu_info.stdout }}"
+
+    - name: Check PyTorch and Intel Extension for PyTorch versions
+      become: yes
+      shell: |
+        /opt/miniconda3/bin/conda run -n intel_image_rec python -c "import torch; import intel_extension_for_pytorch as ipex; print('PyTorch Version:', torch.__version__); print('Intel Extension for PyTorch Version:', ipex.__version__);"
+      environment:
+        PATH: "/opt/miniconda3/envs/intel_image_rec/bin:{{ ansible_env.PATH }}"
+      register: python_version 
+    
+    - name: Print Pytorch version and Intel Extension for PyTorch versions
+      debug:
+        msg: "{{ python_version.stdout }}"
